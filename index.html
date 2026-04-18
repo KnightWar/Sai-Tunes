@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audio Scheduler — Morning & Evening Sessions</title>
+  <meta name="description"
+    content="Schedule and play sequential audio playlists for your morning and evening routines with flexible reminders." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+  <!-- Background Orbs -->
+  <div class="bg-orb orb-morning"></div>
+  <div class="bg-orb orb-evening"></div>
+
+  <!-- Header with Centered Hero -->
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="brand-icon">♪</div>
+      <h1 class="brand-title">Sai Tunes</h1>
+    </div>
+
+    <div class="hero-center">
+      <div id="live-time" class="live-time">00:00:00</div>
+      <div id="live-quote" class="live-quote">"Your session, your rhythm."</div>
+    </div>
+
+    <button id="btn-notify-permission" class="btn-notify" title="Enable Reminders">
+      🔔 Enable Reminders
+    </button>
+  </header>
+
+  <main class="app-main">
+
+    <!-- MAIN PLAYER COMMAND CENTER -->
+    <section class="now-playing-section glass-card" id="now-playing-section">
+      <div class="command-hub">
+        <button id="btn-load-morning" class="session-btn morning-glow">Load Morning</button>
+        <button id="btn-load-evening" class="session-btn evening-glow">Load Evening</button>
+      </div>
+
+      <canvas id="visualizer" class="visualizer-canvas"></canvas>
+
+      <div class="now-playing-track">
+        <div class="track-icon-wrap">
+          <div class="track-icon" id="track-icon">♫</div>
+          <div class="aura-pulse"></div>
+        </div>
+        <div class="track-info">
+          <div id="now-playing-title" class="track-title">Ready to Begin</div>
+          <div id="now-playing-index" class="track-index">Select session above</div>
+        </div>
+        <div id="now-playing-duration" class="track-duration">--:--</div>
+      </div>
+
+      <div class="progress-container">
+        <span id="progress-current" class="progress-time">0:00</span>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar" id="progress-bar"></div>
+          <input type="range" id="progress-slider" class="progress-slider" min="0" max="100" value="0" />
+        </div>
+        <span id="progress-total" class="progress-time">0:00</span>
+      </div>
+
+      <div class="player-controls">
+        <button class="ctrl-btn" id="btn-prev">⏮</button>
+        <button class="ctrl-btn ctrl-play" id="btn-play">▶</button>
+        <button class="ctrl-btn" id="btn-next">⏭</button>
+        <button class="ctrl-btn" id="btn-stop">⏹</button>
+
+        <div class="volume-wrap">
+          <span class="vol-icon">🔊</span>
+          <input type="range" id="volume-slider" class="volume-slider" min="0" max="1" step="0.05" value="1" />
+        </div>
+      </div>
+
+      <audio id="audio-player-1" crossorigin="anonymous"></audio>
+      <audio id="audio-player-2" crossorigin="anonymous"></audio>
+    </section>
+
+    <!-- SESSIONS GRID -->
+    <div class="sessions-grid">
+
+      <!-- MORNING SESSION -->
+      <section class="session-card glass-card morning-card drop-zone" id="morning-section" data-session="morning">
+        <div class="session-header">
+          <div class="session-title-wrap">
+            <span class="session-emoji">🌅</span>
+            <h2 class="session-title">Morning Playlist</h2>
+          </div>
+          <div class="time-picker-wrap">
+            <input type="time" id="morning-time" class="time-picker" value="06:00" />
+            <label class="toggle-wrap">
+              <input type="checkbox" id="morning-auto" checked />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="playlist-wrap" id="morning-playlist"></div>
+        <div class="session-footer">
+          <button class="btn-add-audio morning-btn" id="btn-add-morning">＋ Add Audio</button>
+          <input type="file" id="file-morning" accept="audio/*" multiple hidden />
+        </div>
+      </section>
+
+      <!-- EVENING SESSION -->
+      <section class="session-card glass-card evening-card drop-zone" id="evening-section" data-session="evening">
+        <div class="session-header">
+          <div class="session-title-wrap">
+            <span class="session-emoji">🌆</span>
+            <h2 class="session-title">Evening Playlist</h2>
+          </div>
+          <div class="time-picker-wrap">
+            <input type="time" id="evening-time" class="time-picker" value="19:00" />
+            <label class="toggle-wrap">
+              <input type="checkbox" id="evening-auto" checked />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="playlist-wrap" id="evening-playlist"></div>
+        <div class="session-footer">
+          <button class="btn-add-audio evening-btn" id="btn-add-evening">＋ Add Audio</button>
+          <input type="file" id="file-evening" accept="audio/*" multiple hidden />
+        </div>
+      </section>
+
+    </div>
+
+    </div>
+
+    <!-- REMINDERS -->
+    <section class="reminders-section glass-card" id="reminders-section">
+      <div class="reminders-header">
+        <div class="section-title-wrap">
+          <span class="section-emoji">🔔</span>
+          <h2 class="section-title">Schedule Reminders</h2>
+        </div>
+        <button class="btn-add-reminder" id="btn-add-reminder">+ New Reminder</button>
+      </div>
+
+      <!-- Add Reminder Form (No Date, Relative) -->
+      <div class="reminder-form glass-inner" id="reminder-form" style="display:none;">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Reminder Label</label>
+            <input type="text" id="reminder-label" class="form-input" placeholder="e.g. Daily Yoga" />
+          </div>
+          <div class="form-group">
+            <label>Play for how many days?</label>
+            <select id="reminder-days" class="form-input">
+              <option value="1">1 Day (Today only)</option>
+              <option value="2">2 Days</option>
+              <option value="3">3 Days</option>
+              <option value="7" selected>7 Days (Weekly)</option>
+              <option value="30">30 Days (Monthly)</option>
+              <option value="365">365 Days (Yearly)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Trigger Time</label>
+            <input type="time" id="reminder-time-input" class="form-input" />
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn-cancel" id="btn-cancel-reminder">Cancel</button>
+          <button class="btn-save" id="btn-save-reminder">Activate Reminder</button>
+        </div>
+      </div>
+
+      <div class="reminder-list" id="reminder-list"></div>
+    </section>
+
+  </main>
+
+  <!-- Toast Notification -->
+  <div class="toast" id="toast"></div>
+
+  <script src="db.js"></script>
+  <script src="sample.js"></script>
+  <script src="storage.js"></script>
+  <script src="player.js"></script>
+  <script src="scheduler.js"></script>
+  <script src="reminder.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>
