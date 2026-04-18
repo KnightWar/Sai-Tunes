@@ -9,6 +9,8 @@ const Player = (() => {
   let _index      = -1;
   let _session    = null;
   let _paused     = false;
+  // Detect mobile to optimize for performance/background play
+  const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   
   // Dual players
   const _players  = [
@@ -18,11 +20,10 @@ const Player = (() => {
   let _activeIdx  = 0;
 
   // Silent player for background session persistence
-  const _silentPlayer = new Audio();
-  _silentPlayer.loop = true;
-  // 10s silent buffer - more robust for mobile OS to recognize active session
-  const _silentSrc = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFhYAAAAbAAAAGxhdmY1OC4yOS4xMDABABUAAAAAAAAAAAAAAAD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDD/80MUAAAAAAAAAAAAAAAAAAAAAExhdmY1OC4yOS4xMDCU';
-  _silentPlayer.src = _silentSrc;
+  const _anchorPlayer = new Audio();
+  _anchorPlayer.loop = true;
+  // Minimal silence to keep session alive without CPU overhead
+  _anchorPlayer.src = 'data:audio/wav;base64,UklGRigAAABXQVZFRm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAAAA';
 
   function _primeMediaSession() {
     if ('mediaSession' in navigator) {
@@ -38,8 +39,8 @@ const Player = (() => {
     }
   }
 
-  function _startSilence() {
-    _silentPlayer.play().catch(() => {});
+  function _startAnchor() {
+    _anchorPlayer.play().catch(() => {});
     _primeMediaSession();
   }
 
@@ -57,6 +58,13 @@ const Player = (() => {
 
   /* ── Helpers ── */
   function _initAudioCtx() {
+    // If mobile, we SKIP the AudioContext to prevent "cracking" and background death.
+    // Native <audio> playback is much more stable than Web Audio on iOS/Android.
+    if (_isMobile) {
+      console.log('[Player] Mobile detected: Using native playback for stability.');
+      return;
+    }
+
     if (_audioCtx) return;
     try {
       _canvas = document.getElementById('visualizer');
@@ -84,7 +92,7 @@ const Player = (() => {
   }
 
   function _drawVisualizer() {
-    if (!_ctx || !_analyser) return;
+    if (!_ctx || !_analyser || _isMobile) return;
     _visId = requestAnimationFrame(_drawVisualizer);
     if (document.visibilityState !== 'visible') return;
 
@@ -109,7 +117,7 @@ const Player = (() => {
     if (i < 0 || i >= _playlist.length) return;
     
     _initAudioCtx();
-    if (_audioCtx.state === 'suspended') await _audioCtx.resume();
+    if (_audioCtx && _audioCtx.state === 'suspended') await _audioCtx.resume();
 
     const trackMeta = _playlist[i];
     const trackData = await DB.getTrack(trackMeta.id);
@@ -130,7 +138,11 @@ const Player = (() => {
     try {
       await activePlayer.play();
       if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-    } catch (e) { console.error('[Player] Playback failed:', e); }
+      _startAnchor(); // Ensure anchor is running alongside
+    } catch (e) { 
+      console.error('[Player] Playback failed:', e);
+      // If blocked, prime and wait for touch
+    }
 
     _index = i;
     _paused = false;
@@ -168,8 +180,8 @@ const Player = (() => {
 
   /* ── Public API ── */
   return {
-    init: () => _startSilence(),
-    load: (list, sess, start = 0) => { _startSilence(); _playlist = list; _session = sess; _playIndex(start); },
+    init: () => _startAnchor(),
+    load: (list, sess, start = 0) => { _startAnchor(); _playlist = list; _session = sess; _playIndex(start); },
     play: () => {
       const p = _players[_activeIdx];
       if (_paused) { p.play(); _paused = false; if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing'; }
