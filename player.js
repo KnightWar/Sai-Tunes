@@ -10,12 +10,23 @@ const Player = (() => {
   let _session    = null;
   let _paused     = false;
   
-  // Dual players for crossfading
+  // Dual players
   const _players  = [
     document.getElementById('audio-player-1'),
     document.getElementById('audio-player-2')
   ];
-  let _activeIdx  = 0; // index of the current active player in _players array
+  let _activeIdx  = 0;
+
+  // Silent player for background session persistence
+  const _silentPlayer = new Audio();
+  _silentPlayer.loop = true;
+  // 1-second silent MP3 base64
+  const _silentSrc = 'data:audio/wav;base64,UklGRigAAABXQVZFRm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAAAA';
+  _silentPlayer.src = _silentSrc;
+
+  function _startSilence() {
+    _silentPlayer.play().catch(e => console.log('[Player] Silence play failed', e));
+  }
 
   /* ── Visualizer State ── */
   let _audioCtx   = null;
@@ -70,36 +81,10 @@ const Player = (() => {
     }
   }
 
-  /* ── Fading Logic ── */
-  const FADE_TIME = 3000; // 3 seconds
+  /* ── Fading Logic (Disabled for "No Overlap") ── */
+  const CROSSFADE_ENABLED = false; // User requested no overlapping
 
-  function _fadeOut(player) {
-    const startVol = player.volume;
-    const step = startVol / (FADE_TIME / 100);
-    const interval = setInterval(() => {
-      if (player.volume > step) player.volume -= step;
-      else {
-        player.volume = 0;
-        player.pause();
-        clearInterval(interval);
-      }
-    }, 100);
-  }
-
-  function _fadeIn(player, targetVol = 1) {
-    player.volume = 0;
-    player.play();
-    const step = targetVol / (FADE_TIME / 100);
-    const interval = setInterval(() => {
-      if (player.volume < targetVol - step) player.volume += step;
-      else {
-        player.volume = targetVol;
-        clearInterval(interval);
-      }
-    }, 100);
-  }
-
-  async function _playIndex(i, crossfade = false) {
+  async function _playIndex(i) {
     if (i < 0 || i >= _playlist.length) return;
     
     _initAudioCtx();
@@ -109,48 +94,77 @@ const Player = (() => {
     const trackData = await DB.getTrack(trackMeta.id);
     if (!trackData) { i++; return _playIndex(i); }
 
-    const oldPlayer = _players[_activeIdx];
-    _activeIdx = (_activeIdx + 1) % 2;
-    const newPlayer = _players[_activeIdx];
+    // Hard stop both players to ensure NO OVERLAP
+    _players.forEach(p => {
+      p.pause();
+      p.onended = null;
+      p.ontimeupdate = null;
+    });
+
+    const activePlayer = _players[0]; // Just use one for no-overlap simplicity, or toggle.
+    _activeIdx = 0; 
 
     const blob = _base64ToBlob(trackData.base64, trackData.mimeType);
     const url = URL.createObjectURL(blob);
     
-    const prevUrl = newPlayer._url;
-    newPlayer.src = url;
-    newPlayer._url = url;
-    if (prevUrl) URL.revokeObjectURL(prevUrl);
-
-    if (crossfade && !oldPlayer.paused) {
-      _fadeOut(oldPlayer);
-      _fadeIn(newPlayer, _players[0].parentElement.querySelector('#volume-slider').value);
-    } else {
-      oldPlayer.pause();
-      newPlayer.volume = _players[0].parentElement.querySelector('#volume-slider').value;
-      newPlayer.play();
+    if (activePlayer._url) URL.revokeObjectURL(activePlayer._url);
+    activePlayer.src = url;
+    activePlayer._url = url;
+    activePlayer.volume = document.getElementById('volume-slider').value;
+    
+    try {
+      await activePlayer.play();
+    } catch (e) {
+      console.error('[Player] Playback failed:', e);
     }
 
     _index = i;
     _paused = false;
 
-    // Reset events for new active player
-    newPlayer.ontimeupdate = () => {
-      if (_onProgress) _onProgress(newPlayer.currentTime, newPlayer.duration);
-      // Auto trigger crossfade 3 seconds before ending
-      if (newPlayer.duration && newPlayer.currentTime > newPlayer.duration - (FADE_TIME / 1000) && _index < _playlist.length - 1 && !newPlayer._fadingNext) {
-        newPlayer._fadingNext = true;
-        _playIndex(_index + 1, true);
+    // Update Media Session for Background Play
+    _updateMediaSession(trackMeta);
+
+    activePlayer.ontimeupdate = () => {
+      if (_onProgress) _onProgress(activePlayer.currentTime, activePlayer.duration);
+      // Auto-next logic (without overlap)
+      if (activePlayer.duration && activePlayer.currentTime > activePlayer.duration - 0.5) {
+        if (!activePlayer._triggeringNext && _index < _playlist.length - 1) {
+          activePlayer._triggeringNext = true;
+          // Wait for end or trigger slightly before
+        }
       }
     };
-    newPlayer.onended = () => {
-      newPlayer._fadingNext = false;
-      if (_index >= _playlist.length - 1) {
+
+    activePlayer.onended = () => {
+      activePlayer._triggeringNext = false;
+      if (_index < _playlist.length - 1) {
+        _playIndex(_index + 1);
+      } else {
         _index = -1;
         if (_onPlaybackEnd) _onPlaybackEnd();
       }
     };
 
     if (_onTrackChange) _onTrackChange(trackMeta, i, _session);
+  }
+
+  function _updateMediaSession(meta) {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: meta.name,
+        artist: 'Sai Tunes',
+        album: _session ? `${_session.toUpperCase()} Session` : 'Audio Playlist',
+        artwork: [
+          { src: 'brand-logo.png', sizes: '512x512', type: 'image/png' }
+        ]
+      });
+
+      navigator.mediaSession.setActionHandler('play', () => Player.play());
+      navigator.mediaSession.setActionHandler('pause', () => Player.pause());
+      navigator.mediaSession.setActionHandler('previoustrack', () => Player.prev());
+      navigator.mediaSession.setActionHandler('nexttrack', () => Player.next());
+      navigator.mediaSession.setActionHandler('stop', () => Player.stop());
+    }
   }
 
   function _base64ToBlob(base64, mimeType) {
@@ -162,20 +176,42 @@ const Player = (() => {
 
   /* ── Public API ── */
   return {
+    init: () => _startSilence(),
     load: (list, sess, start = 0) => {
+      _startSilence();
       _playlist = list; _session = sess; _playIndex(start);
     },
     play: () => {
       const p = _players[_activeIdx];
-      if (_paused) { p.play(); _paused = false; }
+      if (_paused) { 
+        p.play(); 
+        _paused = false; 
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+      }
       else if (_index === -1 && _playlist.length > 0) _playIndex(0);
     },
-    pause: () => { if (!_players[_activeIdx].paused) { _players[_activeIdx].pause(); _paused = true; } },
-    stop: () => {
-      _players.forEach(p => { p.pause(); p.src = ''; if (p._url) URL.revokeObjectURL(p._url); p._url = null; });
-      _index = -1; _paused = false; _session = null;
+    pause: () => { 
+      const p = _players[_activeIdx];
+      if (!p.paused) { 
+        p.pause(); 
+        _paused = true; 
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+      } 
     },
-    next: () => { if (_index < _playlist.length - 1) _playIndex(_index + 1, true); },
+    stop: () => {
+      _players.forEach(p => { 
+        p.pause(); 
+        p.src = ''; 
+        if (p._url) URL.revokeObjectURL(p._url); 
+        p._url = null; 
+      });
+      _index = -1; _paused = false; _session = null;
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'none';
+        navigator.mediaSession.metadata = null;
+      }
+    },
+    next: () => { if (_index < _playlist.length - 1) _playIndex(_index + 1); },
     prev: () => { if (_index > 0) _playIndex(_index - 1); },
     setVolume: (v) => _players.forEach(p => p.volume = v),
     seekTo: (f) => { const p = _players[_activeIdx]; if (p.duration) p.currentTime = f * p.duration; },

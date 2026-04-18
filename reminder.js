@@ -4,7 +4,7 @@
  */
 
 const ReminderManager = (() => {
-  let _intervalId  = null;
+  let _worker = null;
   let _onListChange = null;
 
   function _currentHHMM() {
@@ -60,8 +60,17 @@ const ReminderManager = (() => {
   }
 
   function start() {
-    if (_intervalId) return;
-    _intervalId = setInterval(_check, 10000); // Check every 10 seconds
+    if (_worker) return;
+    try {
+      _worker = new Worker('timer-worker.js');
+      _worker.onmessage = (e) => {
+        if (e.data.id === 'reminders') _check();
+      };
+      _worker.postMessage({ action: 'start', id: 'reminders', delay: 10000 });
+    } catch (e) {
+      console.warn('[Reminders] Worker failed, falling back to setInterval', e);
+      setInterval(_check, 10000);
+    }
     _check();
   }
 

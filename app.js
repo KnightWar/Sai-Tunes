@@ -220,6 +220,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
+  /* ── Wake Lock & Background Management ── */
+  let wakeLock = null;
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        console.log('[App] Wake Lock active');
+        wakeLock.addEventListener('release', () => console.log('[App] Wake Lock released'));
+      }
+    } catch (err) { console.warn(`[App] Wake Lock error: ${err.name}, ${err.message}`); }
+  }
+
+  // Request wake lock on any interaction
+  document.addEventListener('click', () => {
+    requestWakeLock();
+    Player.init();
+    // Resume audio context
+    if (window.AudioContext || window.webkitAudioContext) {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === 'suspended') ctx.resume();
+    }
+  }, { once: true });
+
+  // Handle visibility (though Workers handle intervals, we want to ensure visual sync)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && wakeLock === null) requestWakeLock();
+  });
+
   ReminderManager.start();
   Scheduler.start();
 });
